@@ -130,30 +130,121 @@ func DeleteTag(db *sql.DB, tagID int) error {
 	return err
 }
 
+func GetTags(db *sql.DB, postID int) ([]string, error) {
+	var tags []string
+
+	tagIDs, err := db.Query(`SELECT tag_id FROM post_tags WHERE post_id = $1`, postID)
+	if err != nil {
+		fmt.Printf("`SELECT tag_id FROM post_tags WHERE post_id = $1` query in GetTags() failed: %v.\n", err)
+		return nil, err
+	}
+	defer tagIDs.Close()
+
+	for tagIDs.Next() {
+		var tagID int
+		if err := tagIDs.Scan(&tagID); err != nil {
+			fmt.Printf("tagIDs scan in GetTags() failed: %v.\n", err)
+			return nil, err
+		}
+
+		var tag string
+		err := db.QueryRow(`SELECT name FROM tags WHERE id = $1`, tagID).Scan(&tag)
+		if err == sql.ErrNoRows {
+			fmt.Printf("`SELECT name FROM tags WHERE id = $1` query in GetTags() failed: %v.\n", err)
+			return nil, err
+		}
+
+		tags = append(tags, tag)
+	}
+
+	return tags, nil
+}
+
 func GetPost(db *sql.DB, postID int) (Post, error) {
 	var post Post
+
 	err := db.QueryRow(`SELECT * FROM posts WHERE id = $1`, postID).Scan(&post.ID, &post.Title, &post.Content, &post.Category,
 		&post.CreatedAt, &post.UpdatedAt)
 	if err != nil {
+		fmt.Printf("`SELECT * FROM posts WHERE id = $1` query in GetPost() failed: %v.\n", err)
 		return Post{}, err
 	}
 
 	rows, err := db.Query(`SELECT tag_id FROM post_tags WHERE post_id = $1`, postID)
 	if err != nil {
+		fmt.Printf("`SELECT tag_id FROM post_tags WHERE post_id = $1` query in GetPost() failed: %v.\n", err)
 		return Post{}, err
 	}
 	defer rows.Close()
+
 	for rows.Next() {
-		var tagID int
-		if err := rows.Scan(&tagID); err != nil {
-			return Post{}, err
-		}
-		var tag string
-		err = db.QueryRow(`SELECT name FROM tags WHERE id = $1`, tagID).Scan(&tag)
+		post.Tags, err = GetTags(db, post.ID)
 		if err != nil {
 			return Post{}, err
 		}
-		post.Tags = append(post.Tags, tag)
 	}
+
 	return post, nil
+}
+
+func GetAllPosts(db *sql.DB) ([]Post, error) {
+	var posts []Post
+
+	rows, err := db.Query(`SELECT * FROM posts`)
+	if err != nil {
+		fmt.Printf("'SELECT * FROM posts' query in GetAllPosts() failed: %v.\n", err)
+		return nil, err
+	}
+
+	for rows.Next() {
+		var post Post
+		if err := rows.Scan(&post.ID, &post.Title, &post.Content,
+			&post.Category, &post.CreatedAt, &post.UpdatedAt);
+			err != nil {
+			fmt.Printf("rows.Scan in GetAllPosts() failed: %v.\n", err)
+			return nil, err
+		}
+
+		post.Tags, err = GetTags(db, post.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		posts = append(posts, post)
+	}
+
+	return posts, nil
+}
+
+func GetPostsByTerm(db *sql.DB, term string) ([]Post, error) {
+	var posts []Post
+
+	query := `
+		SELECT * FROM posts WHERE title LIKE '%' || ? || '%'
+		OR content LIKE '%' || ? || '%'
+		OR category LIKE '%' || ? || '%'
+	`
+
+	rows, err := db.Query(query, term)
+	if err != nil {
+		fmt.Printf("Search query in GetPostsByTerm() failed: %v.\n", err)
+		return nil, err
+	}
+
+	for rows.Next() {
+		var post Post
+		if err := rows.Scan(&post); err != nil {
+			fmt.Printf("rows scan in GetPostsByTerm() failed: %v.\n", err)
+			return nil, err
+		}
+
+		post.Tags, err = GetTags(db, post.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		posts = append(posts, post)
+	}
+
+	return posts, nil
 }
