@@ -10,11 +10,11 @@ import (
 )
 
 const (
-	host     = "localhost"
-	port     = 5432
-	user     = "konstantin"
+	host = "localhost"
+	port = 5432
+	user = "konstantin"
 	// password = "yourpassword"
-	dbname   = "blog_db"
+	dbname = "blog_db"
 )
 
 func DBConnect() *sql.DB {
@@ -61,16 +61,19 @@ func CreateTable(db *sql.DB) {
 }
 
 func AddOrUpdateTags(db *sql.DB, post Post) error {
-	_, err := db.Exec(`DELETE * FROM post_tags WHERE post_id = $1`, post.ID)
+	_, err := db.Exec(`DELETE FROM post_tags WHERE post_id = $1`, post.ID)
 	if err != nil {
 		return err
 	}
 
 	for tag := range post.Tags {
-		tagID, err := db.Exec(`SELECT id tags WHERE name = $1 RETURNING id`, tag)
-		
+		var tagID int
+		err := db.QueryRow(`SELECT id FROM tags WHERE name = $1`, tag).Scan(&tagID)
+
 		if err == sql.ErrNoRows {
-			tagID, err = db.Exec(`INSERT INTO tags VALUES ($1) RETURNING id`, tag)
+			err = db.QueryRow(`INSERT INTO tags (name) VALUES ($1) RETURNING id`, tag).Scan(&tagID)
+		} else if err != nil {
+			return err
 		}
 
 		if err != nil {
@@ -94,15 +97,15 @@ func CreatePost(db *sql.DB, post Post) (int, error) {
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id`,
 		post.Title, post.Content, post.Category, time.Now(), time.Now(),
-		).Scan(&id)
+	).Scan(&id)
 	if err != nil {
-		return 0, err
-	}
+        return 0, fmt.Errorf("failed to insert post: %w", err)
+    }
 
-	err = AddOrUpdateTags(db, post)
-	if err != nil {
-		return 0, nil
-	}
+	post.ID = id
+    if err := AddOrUpdateTags(db, post); err != nil {
+        return 0, fmt.Errorf("failed to add tags: %w", err)
+    }
 
 	return id, nil
 }
@@ -112,11 +115,11 @@ func UpdatePost(db *sql.DB, post Post) error {
 		UPDATE posts
 		SET title = $1, content = $2, category = $3, updated_at = $4
         WHERE id = $5`,
-        post.Title, 
-        post.Content, 
-        post.Category,
-        time.Now(),
-        post.ID,
+		post.Title,
+		post.Content,
+		post.Category,
+		time.Now(),
+		post.ID,
 	)
 	if err != nil {
 		return err
@@ -204,8 +207,7 @@ func GetAllPosts(db *sql.DB) ([]Post, error) {
 	for rows.Next() {
 		var post Post
 		if err := rows.Scan(&post.ID, &post.Title, &post.Content,
-			&post.Category, &post.CreatedAt, &post.UpdatedAt);
-			err != nil {
+			&post.Category, &post.CreatedAt, &post.UpdatedAt); err != nil {
 			fmt.Printf("rows.Scan in GetAllPosts() failed: %v.\n", err)
 			return nil, err
 		}
@@ -225,10 +227,10 @@ func GetPostsByTerm(db *sql.DB, term string) ([]Post, error) {
 	var posts []Post
 
 	query := `
-		SELECT * FROM posts WHERE title LIKE '%' || ? || '%'
-		OR content LIKE '%' || ? || '%'
-		OR category LIKE '%' || ? || '%'
-	`
+        SELECT * FROM posts WHERE title LIKE '%' || $1 || '%'
+        OR content LIKE '%' || $1 || '%'
+        OR category LIKE '%' || $1 || '%'
+    `
 
 	rows, err := db.Query(query, term)
 	if err != nil {
@@ -238,7 +240,7 @@ func GetPostsByTerm(db *sql.DB, term string) ([]Post, error) {
 
 	for rows.Next() {
 		var post Post
-		if err := rows.Scan(&post); err != nil {
+		if err := rows.Scan(&post.ID, &post.Title, &post.Content, &post.Category, &post.CreatedAt, &post.UpdatedAt); err != nil {
 			fmt.Printf("rows scan in GetPostsByTerm() failed: %v.\n", err)
 			return nil, err
 		}
