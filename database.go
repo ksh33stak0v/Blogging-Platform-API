@@ -71,9 +71,89 @@ func CreatePost(db *sql.DB, post Post) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+
+	err = AddTags(db, post)
+	if err != nil {
+		return 0, nil
+	}
+
 	return id, nil
 }
 
-func UpdatePost(db *sql.DB, post Post) {
-	
+func UpdatePost(db *sql.DB, post Post) error {
+	_, err := db.Exec(`
+		UPDATE posts
+		SET title = $1, content = $2, category = $3, updated_at = $4
+        WHERE id = $5`,
+        post.Title, 
+        post.Content, 
+        post.Category,
+        time.Now(),
+        post.ID,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func AddTags(db *sql.DB, post Post) error {
+	for tag := range post.Tags {
+		tagID, err := db.Exec(`SELECT id tags WHERE name = $1 RETURNING id`, tag)
+		
+		if err == sql.ErrNoRows {
+			tagID, err = db.Exec(`INSERT INTO tags VALUES ($1) RETURNING id`, tag)
+		}
+
+		if err != nil {
+			return err
+		}
+
+		_, err = db.Exec(`INSERT INTO post_tags VALUES ($1, $2)`, post.ID, tagID)
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func DeletePost(db *sql.DB, post Post) error {
+	_, err := db.Exec(`DELETE FROM posts WHERE id = $1`, post.ID)
+	return err
+}
+
+func DeleteTag(db *sql.DB, tagID int) error {
+	_, err := db.Exec(`DELETE FROM tags WHERE id = $1`, tagID)
+	return err
+}
+
+func GetPost(db *sql.DB, postID int) (Post, error) {
+	var post Post
+	err := db.QueryRow(`SELECT * FROM posts WHERE id = $1`, postID).Scan(&post.ID, &post.Title, &post.Content, &post.Category,
+		&post.CreatedAt, &post.UpdatedAt)
+	if err != nil {
+		return Post{}, err
+	}
+
+	rows, err := db.Query(`SELECT tag_id FROM post_tags WHERE post_id = $1`, postID)
+	if err != nil {
+		return Post{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var tagID int
+		if err := rows.Scan(&tagID); err != nil {
+			return Post{}, err
+		}
+		var tag string
+		err = db.QueryRow(`SELECT name FROM tags WHERE id = $1`, tagID).Scan(&tag)
+		if err != nil {
+			return Post{}, err
+		}
+		post.Tags = append(post.Tags, tag)
+	}
+	return post, nil
 }
