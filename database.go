@@ -60,6 +60,33 @@ func CreateTable(db *sql.DB) {
 	fmt.Println("Tables created successfully")
 }
 
+func AddOrUpdateTags(db *sql.DB, post Post) error {
+	_, err := db.Exec(`DELETE * FROM post_tags WHERE post_id = $1`, post.ID)
+	if err != nil {
+		return err
+	}
+
+	for tag := range post.Tags {
+		tagID, err := db.Exec(`SELECT id tags WHERE name = $1 RETURNING id`, tag)
+		
+		if err == sql.ErrNoRows {
+			tagID, err = db.Exec(`INSERT INTO tags VALUES ($1) RETURNING id`, tag)
+		}
+
+		if err != nil {
+			return err
+		}
+
+		_, err = db.Exec(`INSERT INTO post_tags VALUES ($1, $2)`, post.ID, tagID)
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func CreatePost(db *sql.DB, post Post) (int, error) {
 	var id int
 	err := db.QueryRow(`
@@ -72,7 +99,7 @@ func CreatePost(db *sql.DB, post Post) (int, error) {
 		return 0, err
 	}
 
-	err = AddTags(db, post)
+	err = AddOrUpdateTags(db, post)
 	if err != nil {
 		return 0, nil
 	}
@@ -95,26 +122,9 @@ func UpdatePost(db *sql.DB, post Post) error {
 		return err
 	}
 
-	return nil
-}
-
-func AddTags(db *sql.DB, post Post) error {
-	for tag := range post.Tags {
-		tagID, err := db.Exec(`SELECT id tags WHERE name = $1 RETURNING id`, tag)
-		
-		if err == sql.ErrNoRows {
-			tagID, err = db.Exec(`INSERT INTO tags VALUES ($1) RETURNING id`, tag)
-		}
-
-		if err != nil {
-			return err
-		}
-
-		_, err = db.Exec(`INSERT INTO post_tags VALUES ($1, $2)`, post.ID, tagID)
-
-		if err != nil {
-			return err
-		}
+	err = AddOrUpdateTags(db, post)
+	if err != nil {
+		return nil
 	}
 
 	return nil
@@ -122,11 +132,6 @@ func AddTags(db *sql.DB, post Post) error {
 
 func DeletePost(db *sql.DB, post Post) error {
 	_, err := db.Exec(`DELETE FROM posts WHERE id = $1`, post.ID)
-	return err
-}
-
-func DeleteTag(db *sql.DB, tagID int) error {
-	_, err := db.Exec(`DELETE FROM tags WHERE id = $1`, tagID)
 	return err
 }
 
