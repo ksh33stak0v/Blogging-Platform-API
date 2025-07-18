@@ -1,4 +1,4 @@
-module github.com/ksh33stak0v/Blogging-Platform-API
+module blogging-platform-api
 
 go 1.24.4
 
